@@ -1,0 +1,10 @@
+## Interface: 30300
+## Title: Questie Waypoint Arrow|cFF00FF00 v1.0.0|r
+## Author: FrostmourneRebuffed port
+## Notes: Standalone waypoint arrow and smart leveling companion for Questie-335. Does not modify Questie.
+## Version: 1.0.0
+## OptionalDeps: Questie-335, Questie
+## SavedVariables: QuestieWaypointArrowDB
+
+QuestieWaypointArrow.lua
+Options.lua
