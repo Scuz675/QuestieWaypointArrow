@@ -1,4 +1,4 @@
-Questie Waypoint Arrow 1.0.0
+Questie Waypoint Arrow 1.1.0
 ============================
 
 Standalone companion addon for Questie-335 on WoW 3.3.5a.
@@ -13,6 +13,7 @@ FEATURES
 - Waypoint arrow for tracked quest objectives and turn-ins
 - Optional available-quest pickup suggestions
 - Smart Leveling Suggestions
+- Distance-aware smart routing: nearby turn-in > nearby pickup > nearby objective > distant turn-in
 - Hard Maximum Quest Pickup Range for new quest pickups
 - Minimap breadcrumb trail
 - World-map breadcrumb trail
@@ -51,3 +52,19 @@ QuestieMap, AvailableQuests and HereBeDragons rather than copying Questie's
 quest database. If an upstream Questie update renames those internal modules,
 the companion may need a small compatibility update, but Questie itself will
 remain clean and updateable.
+
+SMART ROUTE PRIORITY (1.1.0)
+----------------------------
+When Smart Leveling Suggestions is enabled, completed quests are no longer an
+unconditional top priority. The route now prefers:
+
+1. Completed turn-ins within 350 yards
+2. Recommended quest pickups inside Maximum Quest Pickup Range
+3. Active objectives when a hand-in is a long detour and the objective is local
+   (within 700 yards) or saves at least 250 yards of immediate travel
+4. The distant completed turn-in
+5. Remaining active/fallback quest targets
+
+The Maximum Quest Pickup Range still applies ONLY to new quest pickups. It does
+not hide active objectives or completed turn-ins. `/qwa status` reports the
+current routeDecision to make routing behaviour easier to diagnose.

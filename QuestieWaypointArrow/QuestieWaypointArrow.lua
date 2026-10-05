@@ -70,6 +70,14 @@ local WORLD_TRAIL_REF = {}
 local worldMapTrailDriver
 local worldMapDriverElapsed = 0
 local lastPickupScan = {recommended = 0, optional = 0, skip = 0, sweep = 0, outOfRange = 0, attempted = 0, candidates = 0, cacheCandidates = 0, frameCandidates = 0, directCandidates = 0, miniFrames = 0, worldFrames = 0}
+local lastRouteDecision = "not-evaluated"
+
+-- Smart route tiers. These deliberately stay separate from the pickup-range slider:
+-- that slider is a hard cap only for NEW quest pickups. Completed hand-ins and
+-- active objectives remain routable at any distance.
+local SMART_NEARBY_TURNIN_RANGE = 350
+local SMART_LOCAL_OBJECTIVE_RANGE = 700
+local SMART_OBJECTIVE_SAVINGS = 250
 
 local ADDON_PATH = "Interface\\AddOns\\" .. ADDON_NAME .. "\\"
 local ARROW_TEXTURE = ADDON_PATH .. "Icons\\arrow.tga"
@@ -1333,15 +1341,26 @@ function QWA:FindNearestQuestTarget()
 
     local currentQuestlog = QuestiePlayer.currentQuestlog
     local best
+    local bestTurnin
+    local bestObjective
     local bestPickup
     local bestPickupPriority
+    lastRouteDecision = "scanning"
 
     if currentQuestlog then
         for questId in pairs(currentQuestlog) do
             if (not db.trackedOnly) or IsQuestTracked(questId) then
                 local quest = QuestieDB.GetQuest and QuestieDB.GetQuest(questId)
                 if quest then
-                    best = ConsiderCandidate(best, BuildCandidateFromQuestSpawn(questId, quest))
+                    local candidate = BuildCandidateFromQuestSpawn(questId, quest)
+                    if candidate then
+                        best = ConsiderCandidate(best, candidate)
+                        if candidate.targetType == "turnin" then
+                            bestTurnin = ConsiderCandidate(bestTurnin, candidate)
+                        else
+                            bestObjective = ConsiderCandidate(bestObjective, candidate)
+                        end
+                    end
                 end
             end
         end
@@ -1478,26 +1497,64 @@ function QWA:FindNearestQuestTarget()
         end
     end
 
-    -- Smart leveling hub sweep: if a worthwhile quest pickup is close, collect it before sending
-    -- the player hundreds of yards toward an already-active objective. This is
-    -- intentionally stronger than the generic route score because picking up hub
-    -- quests first enables shared-objective clustering and avoids backtracking.
-    -- Low-priority pickups are constrained by the smart leveling sweep policy.
-    if bestPickup then
-        lastPickupScan.prioritized = bestPickup
+    -- Smart leveling route tiers. A completed quest no longer wins globally just
+    -- because it is complete: that could send a low-level character 1k+ yards
+    -- away while useful work was immediately nearby. The intended leveling flow is:
+    --   1) nearby hand-in
+    --   2) worthwhile pickup inside Maximum Quest Pickup Range
+    --   3) nearby / meaningfully closer active objective
+    --   4) distant hand-in
+    --   5) remaining active/fallback target
+    -- This keeps chain-unlocking local hand-ins valuable without creating long
+    -- backtracking detours in the middle of a questing area.
+    local smartActive = LevelingAdvisor and LevelingAdvisor.IsActive and LevelingAdvisor:IsActive()
+    if smartActive then
+        local turninDistance = bestTurnin and (tonumber(bestTurnin.distance) or 999999999) or 999999999
+        local objectiveDistance = bestObjective and (tonumber(bestObjective.distance) or 999999999) or 999999999
 
-        -- A nearby completed hand-in is still better than taking another quest.
-        if best and best.targetType == "turnin" then
-            local turninDistance = tonumber(best.distance) or 999999999
-            local pickupDistance = tonumber(bestPickup.distance) or 999999999
-            if turninDistance <= 350 or turninDistance <= pickupDistance + 100 then
-                return best
+        if bestTurnin and turninDistance <= SMART_NEARBY_TURNIN_RANGE then
+            lastRouteDecision = "nearby-turnin"
+            return bestTurnin
+        end
+
+        if bestPickup then
+            lastPickupScan.prioritized = bestPickup
+            lastRouteDecision = "nearby-pickup"
+            return bestPickup
+        end
+
+        if bestObjective then
+            if not bestTurnin then
+                lastRouteDecision = "active-objective"
+                return bestObjective
+            end
+
+            -- Only demote a hand-in once it is genuinely a travel leg. A local
+            -- objective wins if it is within the local-work radius, or if doing it
+            -- first saves at least 250 yards compared with the distant hand-in.
+            if turninDistance > SMART_LOCAL_OBJECTIVE_RANGE
+                and (objectiveDistance <= SMART_LOCAL_OBJECTIVE_RANGE
+                    or objectiveDistance + SMART_OBJECTIVE_SAVINGS <= turninDistance) then
+                lastRouteDecision = "objective-before-distant-turnin"
+                return bestObjective
             end
         end
 
-        return bestPickup
+        if bestTurnin then
+            lastRouteDecision = "distant-turnin"
+            return bestTurnin
+        end
+
+        if bestObjective then
+            lastRouteDecision = "active-objective-fallback"
+            return bestObjective
+        end
     end
 
+    if bestPickup then
+        lastPickupScan.prioritized = bestPickup
+    end
+    lastRouteDecision = best and "generic-best" or "no-target"
     return best
 end
 
@@ -2063,7 +2120,8 @@ SlashHandler = function(message)
             .. " mapTrailShown=" .. tostring(worldTrailVisible)
             .. " mapTrailReason=" .. tostring(worldTrailLastReason)
             .. " currentMap=" .. tostring(currentUiMapID)
-            .. " available=" .. tostring(availableCount))
+            .. " available=" .. tostring(availableCount)
+            .. " routeDecision=" .. tostring(lastRouteDecision))
         if target then
             Print("route target: " .. tostring(target.targetType) .. " | " .. tostring(target.questName)
                 .. " | map=" .. tostring(target.uiMapId) .. " | zone=" .. tostring(target.zone)
